@@ -1,0 +1,12 @@
+{
+  "name": "pg-preview-node",
+  "version": "1.0.0",
+  "description": "n8n custom node to preview PostgreSQL table rows",
+  "main": "nodes/PgPreview.node.js",
+  "n8n": {
+    "nodes": "nodes"
+  },
+  "dependencies": {
+    "pg": "^8.11.3"
+  }
+}

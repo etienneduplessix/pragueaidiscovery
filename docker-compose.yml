@@ -1,0 +1,82 @@
+
+version: '3.8'
+
+services:
+  web:
+    build: ./python
+    ports:
+      - "${WEB_PORT:-8000}:8000"
+    depends_on:
+      - db
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    networks:
+      - webnet
+
+  db:
+    image: postgres:${POSTGRES_VERSION:-13}
+    container_name: ${POSTGRES_CONTAINER_NAME:-postgres-db}
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - webnet
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "${ADMINER_PORT:-8080}:8080"
+    depends_on:
+      - db
+    networks:
+      - webnet
+
+  minio:
+    image: minio/minio
+    container_name: ${MINIO_CONTAINER_NAME:-minio}
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      - MINIO_BROWSER_REDIRECT_URL=${MINIO_BROWSER_REDIRECT_URL}
+      - MINIO_CORS_ALLOW_ORIGIN=${MINIO_CORS_ALLOW_ORIGIN}
+    command: server /data --console-address ":9001" --address ":9000"
+    ports:
+      - "${MINIO_API_PORT:-8002}:9000"
+      - "${MINIO_CONSOLE_PORT:-8001}:9001"
+    volumes:
+      - ./minio:/data
+    networks:
+      - webnet
+
+  n8n:
+    build:
+      context: ./n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=${N8N_BASIC_AUTH_ACTIVE}
+      - N8N_BASIC_AUTH_USER=${N8N_BASIC_AUTH_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      - N8N_CUSTOM_EXTENSIONS=${N8N_CUSTOM_EXTENSIONS}
+      - N8N_CORS_ENABLED=${N8N_CORS_ENABLED}
+      - N8N_CORS_ORIGINS=${N8N_CORS_ORIGINS}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - db
+    networks:
+      - webnet
+
+volumes:
+  postgres_data:
+  n8n_data:
+
+networks:
+  webnet:

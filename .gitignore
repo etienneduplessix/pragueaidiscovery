@@ -1,0 +1,42 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Environment config
+.env
+.env.*
+
+# VSCode
+.vscode/
+
+
+# MinIO storage
+minio/
+
+# Docker volumes and containers
+postgres_data/
+n8n_data/
+
+# n8n temp & config
+**/.n8n/
+**/.n8n.*
+
+# Node.js (in case of n8n custom extensions)
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+dist/
+build/
+
+# Logs
+*.log
+
+# IDE folders
+.idea/
+*.swp
+*.pem
+sources.list 
