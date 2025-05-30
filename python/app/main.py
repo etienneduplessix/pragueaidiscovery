@@ -44,11 +44,32 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     maps_link = f"https://www.google.com/maps/dir/{lat1},{lon1}/{lat2},{lon2}"
     
     return distance, maps_link
+def translate_text(text: str, target_lang: str = "en") -> str:
+    """
+    Use the LLM to translate any input text into the target language.
+    If `target_lang` is English (or omitted), return the original text.
+    """
+    # If English or no translation needed, shortcut
+    if target_lang.lower().startswith("en"):
+        return text
 
-def translate_text(text, target_lang):
-    """Basic translation function - can be enhanced with actual translation API"""
-    # For now, return original text. Can be enhanced with Google Translate API
-    return text
+    # Otherwise send to the translation model
+    resp = client.chat.completions.create(
+        model="meta-llama/Meta-Llama-3.1-8B",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    f"You are a translation assistant. "
+                    f"Translate the user’s text into fluent, idiomatic {target_lang}."
+                )
+            },
+            {"role": "user", "content": text}
+        ],
+        temperature=0.2,
+        max_tokens=len(text.split()) * 2
+    )
+    return resp.choices[0].message.content.strip()
 
 # Image classification functions
 def classify_image(image_path):
@@ -309,7 +330,7 @@ async def handle_waste_yards(latitude, longitude):
             f"🕒 {hours}\n"
             f"📞 {contact}\n\n"
         )
-
+    reply = translate_text(reply, "en")
     return reply
 
 # Location handler for both smart containers and recycling bins
@@ -503,36 +524,120 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"Error processing location: {str(e)}")
 
-# General chat handler
+# General chat handler with enhanced LLM functionality
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_text = update.message.text.strip()
 
-    if any(word in message_text.lower() for word in ['help', 'info', 'what']):
+    # Handle help requests
+    if any(word in message_text.lower() for word in ['help', 'info', 'what can you do']):
         await update.message.reply_text(
             "ℹ️ **How to use this bot:**\n\n"
-            "1️⃣ Type /findtrash\n"
-            "2️⃣ Choose your waste type\n"
-            "3️⃣ Share your location\n"
-            "4️⃣ Get nearby disposal options!\n\n"
-            "📸 Or send a photo of waste to identify the correct bin!"
+            "**🗑️ Waste Management:**\n"
+            "• Type /findtrash to locate disposal points\n"
+            "• Send a 📸 photo of waste for bin identification\n"
+            "• Share 📍 location for nearest containers\n\n"
+            "**💬 General Chat:**\n"
+            "• Ask me anything - I'm powered by AI!\n"
+            "• Get help with questions about Prague\n"
+            "• Chat about any topic you're interested in\n\n"
+            "**Commands:**\n"
+            "• /start - Welcome message\n"
+            "• /findtrash - Find waste disposal points\n"
+            "• /chat - Toggle chat mode (always on by default)"
         )
         return
 
+    # Enhanced LLM chat with better system prompt
     try:
+        # Show typing indicator for longer responses
+        await update.message.reply_chat_action('typing')
+        
+        # Get conversation history for context (last 5 messages)
+        if 'chat_history' not in context.user_data:
+            context.user_data['chat_history'] = []
+        
+        # Add current message to history
+        context.user_data['chat_history'].append({"role": "user", "content": message_text})
+        
+        # Keep only last 10 messages (5 user + 5 assistant) for context
+        if len(context.user_data['chat_history']) > 10:
+            context.user_data['chat_history'] = context.user_data['chat_history'][-10:]
+        
+        # Build messages with system prompt and history
+        messages = [
+            {
+                "role": "system", 
+                "content": """You are a helpful and friendly AI assistant integrated into a Prague Waste Management Telegram bot. 
+
+Your primary expertise is helping users with waste disposal and recycling in Prague, but you can chat about absolutely anything else too!
+
+Key capabilities:
+- Help with waste management questions (bins, recycling, disposal)
+- Provide information about Prague city services
+- Engage in general conversation on any topic
+- Be conversational, helpful, and knowledgeable
+
+Guidelines:
+- Keep responses concise but informative (under 300 words)
+- Be friendly and conversational
+- If asked about waste/recycling, mention the bot's photo and location features
+- For Prague-specific questions, provide helpful local context
+- For general topics, be engaging and informative
+
+Remember: Users can send photos of waste for identification and share location for finding nearby disposal points."""
+            }
+        ]
+        
+        # Add conversation history
+        messages.extend(context.user_data['chat_history'])
+        
         response = client.chat.completions.create(
             model=MODEL,
-            messages=[
-                {"role": "system", "content": "You are a friendly assistant who helps users with waste management in Prague and can talk about anything."},
-                {"role": "user", "content": message_text}
-            ],
-            max_tokens=300,
-            temperature=0.7
+            messages=messages,
+            max_tokens=400,
+            temperature=0.8,
+            top_p=0.9
         )
+        
         reply = response.choices[0].message.content.strip()
+        
+        # Add assistant response to history
+        context.user_data['chat_history'].append({"role": "assistant", "content": reply})
+        
+        # Send response
         await update.message.reply_text(reply)
+        
     except Exception as e:
-        await update.message.reply_text("⚠️ Sorry, I couldn't process your message right now.")
-        print(f"[DeepSeek Error]: {e}")
+        error_messages = [
+            "🤔 Hmm, I'm having trouble thinking right now. Try asking me something else!",
+            "⚡ My brain circuits are a bit overloaded. Give me a moment and try again!",
+            "🔄 Something went wrong on my end. Could you rephrase that?",
+            "💭 I'm experiencing some technical difficulties. Let's try that again!"
+        ]
+        import random
+        await update.message.reply_text(random.choice(error_messages))
+        print(f"[LLM Chat Error]: {e}")
+
+# New command to explain chat functionality
+async def chat_info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💬 **Chat Mode Information**\n\n"
+        "I'm always ready to chat! You can ask me about:\n\n"
+        "🗑️ **Waste & Recycling:**\n"
+        "• 'How do I dispose of electronics?'\n"
+        "• 'What bin for plastic bottles?'\n"
+        "• 'Where can I throw away furniture?'\n\n"
+        "🏙️ **Prague Questions:**\n"
+        "• 'Best places to visit in Prague'\n"
+        "• 'How does public transport work?'\n"
+        "• 'Prague weather information'\n\n"
+        "🤖 **General Topics:**\n"
+        "• Technology, science, cooking, travel\n"
+        "• Explain complex topics simply\n"
+        "• Creative writing and brainstorming\n"
+        "• And much more!\n\n"
+        "Just type your message and I'll respond! 😊"
+    )
 
 # Main function
 def main():
@@ -543,6 +648,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("findtrash", findtrash))
+    app.add_handler(CommandHandler("chat", chat_info))
     app.add_handler(CallbackQueryHandler(handle_choice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
