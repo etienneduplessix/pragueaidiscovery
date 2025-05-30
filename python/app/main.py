@@ -2,6 +2,7 @@ import os
 import requests
 import tempfile
 import math
+import base64
 from pathlib import Path
 from dotenv import load_dotenv
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -13,6 +14,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY")
 GOLEMIO_API_KEY = os.getenv("GOLEMIO_API_KEY")
+VISION_API_KEY = os.getenv("VISION_API_KEY")
 
 # Validate required environment variables
 if not all([TELEGRAM_TOKEN, FEATHERLESS_API_KEY, GOLEMIO_API_KEY]):
@@ -27,21 +29,65 @@ client = OpenAI(
 # === SIMULATED CLASSIFIER ===
 def classify_image(image_path):
     try:
-        # Replace this with a real ML model or cloud vision API
-        return "plastic bottle"
+        with open(image_path, "rb") as image_file:
+            content = base64.b64encode(image_file.read()).decode("utf-8")
+
+        url = "https://vision.googleapis.com/v1/images:annotate"
+        params = {"key": VISION_API_KEY}
+        headers = {"Content-Type": "application/json"}
+        body = {
+            "requests": [{
+                "image": {"content": content},
+                "features": [{"type": "LABEL_DETECTION", "maxResults": 5}]
+            }]
+        }
+
+        response = requests.post(url, params=params, headers=headers, json=body)
+        result = response.json()
+
+        labels = result['responses'][0].get('labelAnnotations', [])
+        if not labels:
+            return "unknown"
+
+        return labels[0]['description'].lower()
+
     except Exception as e:
         raise Exception(f"Error classifying image: {str(e)}")
 
-def map_to_bin(item):
-    bin_mapping = {
-        "plastic bottle": "yellow",
-        "glass bottle": "green",
-        "paper": "blue",
-        "cardboard": "blue",
-        "metal": "yellow",
-        "organic": "brown"
-    }
-    return bin_mapping.get(item.lower(), "unknown")
+def map_to_bin(label):
+    label = label.lower()
+
+    if any(x in label for x in ["plastic", "bottle", "pet", "packaging", "bag"]):
+        return ("Plastics", "yellow")
+
+    elif any(x in label for x in ["paper", "cardboard", "newspaper", "magazine", "envelope"]):
+        return ("Paper", "blue")
+
+    elif any(x in label for x in ["glass", "jar", "bottle"]):
+        # Optional: split between green (colored glass) and white (clear glass)
+        return ("Glass", "green")
+
+    elif any(x in label for x in ["can", "tin", "metal", "aluminum", "foil"]):
+        return ("Metals", "gray")
+
+    elif any(x in label for x in ["fruit", "vegetable", "food", "organic", "peel", "compost"]):
+        return ("Biodegradable waste", "brown")
+
+    elif any(x in label for x in ["carton", "tetrapak", "juice box", "milk carton"]):
+        return ("Beverage cartons", "orange")
+
+    elif any(x in label for x in ["phone", "battery", "cable", "electronic", "charger"]):
+        return ("Electronic waste", "drop-off")
+
+    elif any(x in label for x in ["chemical", "paint", "medicine", "hazardous", "toxic"]):
+        return ("Hazardous waste", "drop-off")
+
+    elif any(x in label for x in ["clothes", "textile", "fabric", "shoes"]):
+        return ("Textile", "drop-off")
+
+    else:
+        return ("Mixed waste", "black")
+
 
 # Helper: Translate message to target language
 def translate_text(text, target_lang):
