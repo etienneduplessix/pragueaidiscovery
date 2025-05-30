@@ -1,29 +1,29 @@
 import os
 import requests
 from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from openai import OpenAI
 
-# Load environment variables from .env
+# Load environment variables
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY")
 GOLEMIO_API_KEY = os.getenv("GOLEMIO_API_KEY")
 
-# Setup OpenAI-compatible Featherless client
 client = OpenAI(
     base_url="https://api.featherless.ai/v1",
     api_key=FEATHERLESS_API_KEY
 )
+MODEL = "deepseek-ai/DeepSeek-V3-0324"
 
-# Helper: Translate message to target language
+# Translation using DeepSeek
 def translate_text(text, target_lang):
     try:
         if target_lang.lower() in ["en", ""]:
-            return text  # No translation needed
+            return text
         response = client.chat.completions.create(
-            model='meta-llama/Meta-Llama-3.1-8B',
+            model=MODEL,
             messages=[
                 {"role": "system", "content": f"Translate the following message to {target_lang.upper()}."},
                 {"role": "user", "content": text}
@@ -36,100 +36,114 @@ def translate_text(text, target_lang):
 # /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = update.effective_user.language_code or "en"
-    message = (
-        "👋 Hi! I'm your smart assistant.\n"
-        "Send me a message to chat, or share your location 📍 to find the nearest smart trash container."
-    )
-    translated = translate_text(message, lang)
-    await update.message.reply_text(translated)
+    msg = "👋 Hi! I'm your waste assistant.\nUse /findtrash and share your location 📍 to get disposal info."
+    await update.message.reply_text(translate_text(msg, lang))
 
-# Chat handler
-async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_input = update.message.text
+# /findtrash command - asks what type of trash user has
+async def findtrash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = update.effective_user.language_code or "en"
+    buttons = [
+        [InlineKeyboardButton("♻️ Smart Bin", callback_data="smarttrash")],
+        [InlineKeyboardButton("📦 Bulky Waste", callback_data="bulkytrash")],
+        [InlineKeyboardButton("🏭 Collection Yard", callback_data="wasteyard")]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    msg = "What type of trash do you want to dispose of?"
+    await update.message.reply_text(translate_text(msg, lang), reply_markup=reply_markup)
 
-    try:
-        response = client.chat.completions.create(
-            model='meta-llama/Meta-Llama-3.1-8B',
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_input}
-            ]
-        )
-        reply = response.model_dump()['choices'][0]['message']['content']
-        translated = translate_text(reply, lang)
-    except Exception as e:
-        translated = f"⚠️ Error: {str(e)}"
+# Handles trash type choice and asks for location
+async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = update.effective_user.language_code or "en"
+    query = update.callback_query
+    await query.answer()
+    choice = query.data
+    context.user_data["mode"] = choice
 
-    await update.message.reply_text(translated)
+    button = KeyboardButton(text=translate_text("📍 Send Location", lang), request_location=True)
+    reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
-# Location handler for Golemio smart containers
+    prompt = {
+        "smarttrash": "Please send your location to find a smart trash container.",
+        "bulkytrash": "Please send your location to find a bulky waste station.",
+        "wasteyard": "Please send your location to find a collection yard."
+    }.get(choice, "Please send your location.")
+
+    await query.message.reply_text(translate_text(prompt, lang), reply_markup=reply_markup)
+
+# Location handler: uses mode from user_data
 async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     loc = update.message.location
-    latitude = loc.latitude
-    longitude = loc.longitude
+    latitude, longitude = loc.latitude, loc.longitude
     lang = update.effective_user.language_code or "en"
-
-    headers = {
-        "x-access-token": GOLEMIO_API_KEY
-    }
-
-    params = {
-        "latlng": f"{latitude},{longitude}",
-        "range": 1000,
-        "onlyMonitored": "true",
-        "limit": 1
-    }
+    mode = context.user_data.get("mode", "smarttrash")
 
     try:
-        response = requests.get(
-            "https://api.golemio.cz/v2/sortedwastestations",
-            headers=headers,
-            params=params
-        )
-        data = response.json()
-        features = data.get("features", [])
+        if mode == "smarttrash":
+            url = "https://api.golemio.cz/v2/sortedwastestations"
+            params = {"latlng": f"{latitude},{longitude}", "range": 1000, "onlyMonitored": "true", "limit": 1}
+            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
+            data = r.json()
+            if not data.get("features"):
+                raise Exception("No smart containers nearby.")
+            feature = data["features"][0]
+            name = feature["properties"]["name"]
+            district = feature["properties"].get("district", "Unknown")
+            reply = f"📍 *Smart Trash Container*\nLocation: *{name}* ({district})\n"
+            for c in feature["properties"]["containers"]:
+                t = c["trash_type"]["description"]
+                f = c.get("last_measurement", {}).get("percent_calculated", "?")
+                reply += f"• {t}: {f}% full\n"
 
-        if not features:
-            await update.message.reply_text(
-                translate_text("🚫 No monitored containers nearby.", lang)
-            )
-            return
+        elif mode == "bulkytrash":
+            url = "https://api.golemio.cz/v1/bulky-waste/stations"
+            params = {"latlng": f"{latitude},{longitude}", "range": 1, "limit": 1}
+            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
+            data = r.json()
+            if not data.get("features"):
+                raise Exception("No bulky waste containers nearby.")
+            p = data["features"][0]["properties"]
+            reply = f"📦 *Bulky Waste Container*\nStreet: *{p['street']}*\nDate: {p['date']} {p['timeFrom']}–{p['timeTo']}\nDistrict: {p['cityDistrict']}"
 
-        feature = features[0]
-        name = feature["properties"]["name"]
-        district = feature["properties"].get("district", "Unknown")
-        containers = feature["properties"]["containers"]
+        elif mode == "wasteyard":
+            url = "https://api.golemio.cz/v2/wastecollectionyards"
+            params = {"latlng": f"{latitude},{longitude}", "range": 5000, "limit": 1}
+            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
+            data = r.json()
+            if not data.get("features"):
+                raise Exception("No waste collection yards nearby.")
+            yard = data["features"][0]["properties"]
+            addr = yard["address"]["address_formatted"]
+            hours = yard.get("operating_hours", "Unknown hours")
+            name = yard["name"]
+            contact = yard.get("contact", "")
+            reply = f"🏭 *Waste Collection Yard*\n{name}\n📍 {addr}\n🕒 {hours}\n📞 {contact}"
 
-        if not containers:
-            await update.message.reply_text(
-                translate_text("🚫 No container data found at the closest location.", lang)
-            )
-            return
+        else:
+            reply = "Unknown request mode."
 
-        reply = f"📍 *Closest Smart Trash Container:*\n"
-        reply += f"Location: *{name}* ({district})\n\n"
-
-        for container in containers:
-            trash_type = container["trash_type"]["description"]
-            if container.get("last_measurement") and "percent_calculated" in container["last_measurement"]:
-                fullness = f"{container['last_measurement']['percent_calculated']}% full"
-            else:
-                fullness = "❓ fullness unknown"
-            reply += f"• {trash_type}: {fullness}\n"
-
-        translated = translate_text(reply, lang)
-        await update.message.reply_text(translated, parse_mode='Markdown')
+        await update.message.reply_text(translate_text(reply, lang), parse_mode='Markdown')
 
     except Exception as e:
-        await update.message.reply_text(
-            translate_text(f"⚠️ Golemio API error: {e}", lang)
-        )
+        await update.message.reply_text(translate_text(f"⚠️ Error: {e}", lang))
 
-# App runner
+# Fallback for unsupported content
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = update.effective_user.language_code or "en"
+    msg = "Please use /findtrash and share your location 📍."
+    await update.message.reply_text(translate_text(msg, lang))
+
+# Main app
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+    # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
+    app.add_handler(CommandHandler("findtrash", findtrash))
+
+    # Choice and response handlers
+    app.add_handler(CallbackQueryHandler(handle_choice))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
+    app.add_handler(MessageHandler(~filters.TEXT & ~filters.LOCATION, unknown))
+
     app.run_polling()
