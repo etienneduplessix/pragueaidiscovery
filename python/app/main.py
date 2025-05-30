@@ -45,11 +45,13 @@ def classify_image(image_path):
         response = requests.post(url, params=params, headers=headers, json=body)
         result = response.json()
 
-        labels = result['responses'][0].get('labelAnnotations', [])
-        if not labels:
-            return "unknown"
-
-        return labels[0]['description'].lower()
+        labels = [l['description'].lower() for l in result['responses'][0].get('labelAnnotations', [])]
+        for label in labels:
+            category, color = map_to_bin(label)
+            if category != "Mixed waste":
+                return label  # Return first useful match
+        
+        return labels[0] if labels else "unknown"
 
     except Exception as e:
         raise Exception(f"Error classifying image: {str(e)}")
@@ -112,7 +114,10 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     Calculate the great circle distance between two points 
     on the earth (specified in decimal degrees)
     """
-    # Convert decimal degrees to radians
+    # Save original coordinates for the map link
+    origin_lat, origin_lon, dest_lat, dest_lon = lat1, lon1, lat2, lon2
+
+    # Convert decimal degrees to radians for calculation
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
 
     # Haversine formula
@@ -121,7 +126,16 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
     c = 2 * math.asin(math.sqrt(a))
     r = 6371  # Radius of earth in kilometers
-    return c * r * 1000  # Convert to meters
+    distance_meters = c * r * 1000  # Convert to meters
+
+    # Use original (non-radian) coordinates for Google Maps
+    maps_link = (
+        f"https://www.google.com/maps/dir/?api=1"
+        f"&origin={origin_lat},{origin_lon}&destination={dest_lat},{dest_lon}"
+        f"&travelmode=walking"
+    )
+
+    return distance_meters, maps_link
 
 # /start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -225,7 +239,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         longitude,
                         f["geometry"]["coordinates"][1],
                         f["geometry"]["coordinates"][0]
-                    )
+                    )[0]
                 )
 
                 properties = closest_feature["properties"]
@@ -236,7 +250,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 city = properties.get("city", "Prague")
                 
                 # Calculate exact distance
-                distance = calculate_distance(
+                distance, maps_link = calculate_distance(
                     latitude,
                     longitude,
                     closest_feature["geometry"]["coordinates"][1],
@@ -253,7 +267,8 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message += (
                     f"District: {district}\n"
                     f"City: {city}\n"
-                    f"Distance: {distance:.0f}m"
+                    f"Distance: {distance:.0f}m\n"
+                    f"[🗺️ Open in Google Maps]({maps_link})"
                 )
 
                 translated = translate_text(message, lang)
@@ -291,7 +306,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     longitude,
                     f["geometry"]["coordinates"][1],
                     f["geometry"]["coordinates"][0]
-                )
+                )[0]
             )
 
             properties = closest_feature["properties"]
@@ -303,7 +318,7 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             containers = properties["containers"]
             
             # Calculate exact distance
-            distance = calculate_distance(
+            distance, maps_link = calculate_distance(
                 latitude,
                 longitude,
                 closest_feature["geometry"]["coordinates"][1],
@@ -312,12 +327,13 @@ async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             message = f"🗑️ *Closest Smart Trash Container (within 500m):*\n\n"
             message += f"*{name}*\n"
-            message += f"📍 Address: {address}\n"
-            if street:
-                message += f"Street: {street}\n"
-            message += f"District: {district}\n"
-            message += f"City: {city}\n"
-            message += f"Distance: {distance:.0f}m\n\n"
+            #message += f"📍 Address: {address}\n"
+            #if street:
+                #message += f"Street: {street}\n"
+            #message += f"District: {district}\n"
+            #message += f"City: {city}\n"
+            message += f"Distance: {distance:.0f}m\n"
+            message += f"[🗺️ Open in Google Maps]({maps_link})\n\n"
             
             if containers:
                 message += "*Containers:*\n"
