@@ -1,47 +1,80 @@
 import os
 import requests
+import tempfile
+import math
 from dotenv import load_dotenv
-from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from openai import OpenAI
+from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, decode_predictions, preprocess_input
+from tensorflow.keras.preprocessing import image
+import numpy as np
 
 # Load environment variables
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-FEATHERLESS_API_KEY = os.getenv("FEATHERLESS_API_KEY")
 GOLEMIO_API_KEY = os.getenv("GOLEMIO_API_KEY")
 
-client = OpenAI(
-    base_url="https://api.featherless.ai/v1",
-    api_key=FEATHERLESS_API_KEY
-)
-MODEL = "deepseek-ai/DeepSeek-V3-0324"
+if not TELEGRAM_TOKEN or not GOLEMIO_API_KEY:
+    raise ValueError("Missing TELEGRAM_BOT_TOKEN or GOLEMIO_API_KEY in environment variables.")
 
-# Translation using DeepSeek
-def translate_text(text, target_lang):
+# Load MobileNetV2 model once
+mobilenet_model = MobileNetV2(weights='imagenet')
+
+def classify_image(image_path):
     try:
-        if target_lang.lower() in ["en", ""]:
-            return text
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": f"Translate the following message to {target_lang.upper()}."},
-                {"role": "user", "content": text}
-            ]
-        )
-        return response.model_dump()['choices'][0]['message']['content']
+        img = image.load_img(image_path, target_size=(224, 224))
+        x = image.img_to_array(img)
+        x = np.expand_dims(x, axis=0)
+        x = preprocess_input(x)
+        preds = mobilenet_model.predict(x)
+        decoded = decode_predictions(preds, top=1)[0][0]
+        label = decoded[1].replace("_", " ").lower()
+        return label
     except Exception as e:
-        return f"Translation error: {str(e)}"
+        raise Exception(f"ML classification failed: {str(e)}")
 
-# /start command
+def map_to_bin(item):
+    if any(word in item for word in ["plastic", "bottle", "can"]):
+        return "yellow"
+    elif any(word in item for word in ["glass"]):
+        return "green"
+    elif any(word in item for word in ["paper", "newspaper", "cardboard"]):
+        return "blue"
+    elif any(word in item for word in ["organic", "banana", "food", "apple"]):
+        return "brown"
+    elif any(word in item for word in ["metal"]):
+        return "yellow"
+    return "unknown"
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    r = 6371
+    return c * r * 1000
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = update.effective_user.language_code or "en"
-    msg = "👋 Hi! I'm your waste assistant.\nUse /findtrash and share your location 📍 to get disposal info."
-    await update.message.reply_text(translate_text(msg, lang))
+    buttons = [
+        [InlineKeyboardButton("📷 Send Waste Photo", callback_data="sendphoto")],
+        [InlineKeyboardButton("♻️ Find Trash Location", callback_data="findtrash")]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(
+        "👋 Hi! I'm your smart recycling assistant.\nChoose what you want to do:",
+        reply_markup=reply_markup
+    )
 
-# /findtrash command - asks what type of trash user has
+async def handle_main_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "sendphoto":
+        await query.message.reply_text("Please send me a photo of your waste.")
+    elif query.data == "findtrash":
+        await findtrash(update, context)
+
 async def findtrash(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = update.effective_user.language_code or "en"
     buttons = [
         [InlineKeyboardButton("♻️ Smart Bin", callback_data="smarttrash")],
         [InlineKeyboardButton("📦 Bulky Waste", callback_data="bulkytrash")],
@@ -49,17 +82,18 @@ async def findtrash(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(buttons)
     msg = "What type of trash do you want to dispose of?"
-    await update.message.reply_text(translate_text(msg, lang), reply_markup=reply_markup)
+    if update.callback_query:
+        await update.callback_query.message.reply_text(msg, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(msg, reply_markup=reply_markup)
 
-# Handles trash type choice and asks for location
 async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = update.effective_user.language_code or "en"
     query = update.callback_query
     await query.answer()
     choice = query.data
     context.user_data["mode"] = choice
 
-    button = KeyboardButton(text=translate_text("📍 Send Location", lang), request_location=True)
+    button = KeyboardButton(text="📍 Send Location", request_location=True)
     reply_markup = ReplyKeyboardMarkup([[button]], resize_keyboard=True, one_time_keyboard=True)
 
     prompt = {
@@ -68,82 +102,123 @@ async def handle_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "wasteyard": "Please send your location to find a collection yard."
     }.get(choice, "Please send your location.")
 
-    await query.message.reply_text(translate_text(prompt, lang), reply_markup=reply_markup)
+    await query.message.reply_text(prompt, reply_markup=reply_markup)
 
-# Location handler: uses mode from user_data
-async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    loc = update.message.location
-    latitude, longitude = loc.latitude, loc.longitude
-    lang = update.effective_user.language_code or "en"
-    mode = context.user_data.get("mode", "smarttrash")
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    photo = update.message.photo[-1]
+    file = await photo.get_file()
+    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+        image_path = temp_file.name
+        await file.download_to_drive(image_path)
 
     try:
-        if mode == "smarttrash":
-            url = "https://api.golemio.cz/v2/sortedwastestations"
-            params = {"latlng": f"{latitude},{longitude}", "range": 1000, "onlyMonitored": "true", "limit": 1}
-            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
-            data = r.json()
-            if not data.get("features"):
-                raise Exception("No smart containers nearby.")
-            feature = data["features"][0]
-            name = feature["properties"]["name"]
-            district = feature["properties"].get("district", "Unknown")
-            reply = f"📍 *Smart Trash Container*\nLocation: *{name}* ({district})\n"
-            for c in feature["properties"]["containers"]:
-                t = c["trash_type"]["description"]
-                f = c.get("last_measurement", {}).get("percent_calculated", "?")
-                reply += f"• {t}: {f}% full\n"
+        item = classify_image(image_path)
+        bin_color = map_to_bin(item)
+        context.user_data["last_item"] = (item, bin_color)
+        message = (
+            f"I think it's a *{item}* (AI classified).\n"
+            f"Please share your location so I can find the nearest *{bin_color}* bin."
+        )
+        await update.message.reply_text(
+            message,
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("📍 Send Location", request_location=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True
+            ),
+            parse_mode='Markdown'
+        )
+    finally:
+        if os.path.exists(image_path):
+            os.unlink(image_path)
 
-        elif mode == "bulkytrash":
-            url = "https://api.golemio.cz/v1/bulky-waste/stations"
-            params = {"latlng": f"{latitude},{longitude}", "range": 1, "limit": 1}
-            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
-            data = r.json()
-            if not data.get("features"):
-                raise Exception("No bulky waste containers nearby.")
-            p = data["features"][0]["properties"]
-            reply = f"📦 *Bulky Waste Container*\nStreet: *{p['street']}*\nDate: {p['date']} {p['timeFrom']}–{p['timeTo']}\nDistrict: {p['cityDistrict']}"
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    loc = update.message.location
+    latitude = loc.latitude
+    longitude = loc.longitude
+    mode = context.user_data.get("mode", "smarttrash")
+    headers = {"x-access-token": GOLEMIO_API_KEY}
 
-        elif mode == "wasteyard":
-            url = "https://api.golemio.cz/v2/wastecollectionyards"
-            params = {"latlng": f"{latitude},{longitude}", "range": 5000, "limit": 1}
-            r = requests.get(url, headers={"x-access-token": GOLEMIO_API_KEY}, params=params)
-            data = r.json()
-            if not data.get("features"):
-                raise Exception("No waste collection yards nearby.")
-            yard = data["features"][0]["properties"]
-            addr = yard["address"]["address_formatted"]
-            hours = yard.get("operating_hours", "Unknown hours")
-            name = yard["name"]
-            contact = yard.get("contact", "")
-            reply = f"🏭 *Waste Collection Yard*\n{name}\n📍 {addr}\n🕒 {hours}\n📞 {contact}"
+    if "last_item" in context.user_data:
+        item, bin_color = context.user_data.pop("last_item")
+        params = {"latlng": f"{latitude},{longitude}", "range": 500, "onlyMonitored": "true", "limit": 5}
+        response = requests.get("https://api.golemio.cz/v2/sortedwastestations", headers=headers, params=params)
+        data = response.json()
+        features = data.get("features", [])
 
-        else:
-            reply = "Unknown request mode."
+        if not features:
+            await update.message.reply_text(f"🚫 No {bin_color} bins found within 500m for {item}.")
+            return
 
-        await update.message.reply_text(translate_text(reply, lang), parse_mode='Markdown')
+        closest = min(features, key=lambda f: calculate_distance(
+            latitude, longitude, f["geometry"]["coordinates"][1], f["geometry"]["coordinates"][0]))
 
-    except Exception as e:
-        await update.message.reply_text(translate_text(f"⚠️ Error: {e}", lang))
+        props = closest["properties"]
+        name = props["name"]
+        address = props.get("address", "Unknown")
+        dist = calculate_distance(latitude, longitude, closest["geometry"]["coordinates"][1], closest["geometry"]["coordinates"][0])
 
-# Fallback for unsupported content
+        message = (
+            f"🗑️ *Nearest {bin_color} bin for {item}:*\n\n*{name}*\n📍 Address: {address}\nDistance: {dist:.0f}m"
+        )
+        await update.message.reply_text(message, parse_mode='Markdown')
+        return
+
+    if mode == "smarttrash":
+        url = "https://api.golemio.cz/v2/sortedwastestations"
+        params = {"latlng": f"{latitude},{longitude}", "range": 1000, "onlyMonitored": "true", "limit": 1}
+        r = requests.get(url, headers=headers, params=params)
+        data = r.json()
+        if not data.get("features"):
+            await update.message.reply_text("🚫 No smart containers nearby.")
+            return
+        f = data["features"][0]
+        name = f["properties"]["name"]
+        district = f["properties"].get("district", "Unknown")
+        reply = f"📍 *Smart Trash Container*\nLocation: *{name}* ({district})\n"
+        for c in f["properties"]["containers"]:
+            t = c["trash_type"]["description"]
+            fullness = c.get("last_measurement", {}).get("percent_calculated", "?")
+            reply += f"• {t}: {fullness}% full\n"
+        await update.message.reply_text(reply, parse_mode='Markdown')
+
+    elif mode == "bulkytrash":
+        url = "https://api.golemio.cz/v1/bulky-waste/stations"
+        params = {"latlng": f"{latitude},{longitude}", "range": 1, "limit": 1}
+        r = requests.get(url, headers=headers, params=params)
+        data = r.json()
+        if not data.get("features"):
+            await update.message.reply_text("🚫 No bulky waste containers nearby.")
+            return
+        p = data["features"][0]["properties"]
+        reply = f"📦 *Bulky Waste Container*\nStreet: *{p['street']}*\nDate: {p['date']} {p['timeFrom']}–{p['timeTo']}\nDistrict: {p['cityDistrict']}"
+        await update.message.reply_text(reply, parse_mode='Markdown')
+
+    elif mode == "wasteyard":
+        url = "https://api.golemio.cz/v2/wastecollectionyards"
+        params = {"latlng": f"{latitude},{longitude}", "range": 5000, "limit": 1}
+        r = requests.get(url, headers=headers, params=params)
+        data = r.json()
+        if not data.get("features"):
+            await update.message.reply_text("🚫 No waste collection yards nearby.")
+            return
+        y = data["features"][0]["properties"]
+        reply = f"🏭 *Waste Collection Yard*\n{y['name']}\n📍 {y['address']['address_formatted']}\n🕒 {y.get('operating_hours', 'Unknown')}\n📞 {y.get('contact', '')}"
+        await update.message.reply_text(reply, parse_mode='Markdown')
+    else:
+        await update.message.reply_text("Unknown request mode.")
+
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = update.effective_user.language_code or "en"
-    msg = "Please use /findtrash and share your location 📍."
-    await update.message.reply_text(translate_text(msg, lang))
+    await update.message.reply_text("Please use /start and choose an action.")
 
-# Main app
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-
-    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("findtrash", findtrash))
-
-    # Choice and response handlers
+    app.add_handler(CallbackQueryHandler(handle_main_choice, pattern="^(sendphoto|findtrash)$"))
     app.add_handler(CallbackQueryHandler(handle_choice))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.LOCATION, handle_location))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
     app.add_handler(MessageHandler(~filters.TEXT & ~filters.LOCATION, unknown))
-
     app.run_polling()
