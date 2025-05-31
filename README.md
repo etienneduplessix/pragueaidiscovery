@@ -1,5 +1,3 @@
-markdown
-
 # Prague Waste Assistant Bot
 
 A Telegram bot to help Prague residents identify waste items via photo classification and locate nearby waste-disposal points (smart bins, bulky-waste collection, waste yards) using the Golemio API. The bot integrates with an AI backend (Featherless API + Meta-Llama) for translation and general chat.
@@ -26,8 +24,8 @@ A Telegram bot to help Prague residents identify waste items via photo classific
 - **Bin Locator**: After classification, share your location to find the nearest bin of the appropriate type within 500 meters.
 - **Smart Bin Monitor**: Use `/findtrash → Smart Bins`, share your location, and view up to 3 nearby smart bins with fill-level indicators (🟢 green, 🟡 yellow, 🔴 red, or ⚪ unknown).
 - **Bulky Waste & Waste Yards**: Use `/findtrash` to locate scheduled bulky-waste pickup points or permanent waste yards in Prague via the Golemio API.
-- **Multilingual Support**: Messages are translated via Meta-Llama into the user’s Telegram language (if not English).
-- **General AI Chat**: Non-command messages are sent to DeepSeek for AI responses, translated back to the user’s language if needed.
+- **Multilingual Support**: Messages are translated via Meta-Llama into the user's Telegram language (if not English).
+- **General AI Chat**: Non-command messages are sent to DeepSeek for AI responses, translated back to the user's language if needed.
 
 ## Prerequisites
 
@@ -41,6 +39,7 @@ A Telegram bot to help Prague residents identify waste items via photo classific
 
 ## Project Structure
 
+```
 .
 ├── .env                    # Environment variables (never commit to Git)
 ├── docker-compose.yml      # Docker Compose configuration
@@ -52,8 +51,9 @@ A Telegram bot to help Prague residents identify waste items via photo classific
 │   ├── helpers.py         # Utility functions
 │   ├── commands.py        # Command handlers
 │   ├── utils.py           # Additional utilities
-│   └── init.py        # Python package init
+│   └── init.py            # Python package init
 └── README.md              # Project documentation
+```
 
 ## Environment Variables
 
@@ -64,174 +64,166 @@ TELEGRAM_BOT_TOKEN=your-telegram-bot-token
 FEATHERLESS_API_KEY=your-featherless-api-key
 GOLEMIO_API_KEY=your-golemio-api-key
 VISION_API_KEY=your-google-vision-api-key
+```
 
-Ensure .env is listed in .gitignore.
+Ensure `.env` is listed in `.gitignore`.
 
-Replace placeholders with your actual API keys.
+## Local Development
 
-Local Development
-Clone the Repository:
-bash
-
+1. Clone the Repository:
+```bash
 git clone https://github.com/yourusername/prague-waste-bot.git
 cd prague-waste-bot
+```
 
-Set Up Virtual Environment:
-bash
-
+2. Set Up Virtual Environment:
+```bash
 python3.10 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
 
-Install Dependencies:
-bash
-
+3. Install Dependencies:
+```bash
 pip install --no-cache-dir -r python/requirements.txt
+```
 
-Configure .env:
-bash
-
+4. Configure `.env`:
+```bash
 cp .env.example .env
 # Edit .env with your API keys
+```
 
-Run the Bot:
-bash
-
+5. Run the Bot:
+```bash
 python app/main.py
+```
 
-Output:  Bot started and ready!
+Output: `Bot started and ready!`
 
-Test the Bot:
-Open Telegram, find your bot, and send /start.
+6. Test the Bot:
+- Open Telegram, find your bot, and send `/start`
+- Test `/findtrash` or send a photo to classify waste
+- Stop the bot with `Ctrl+C`
 
-Test /findtrash or send a photo to classify waste.
+## Docker Setup
 
-Stop the bot with Ctrl+C.
+### Dockerfile (python:3.10-slim)
 
-Docker Setup
-Dockerfile (python:3.10-slim)
-dockerfile
-
+```dockerfile
 FROM python:3.10-slim
 WORKDIR /app
 COPY python/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ .
 CMD ["python", "main.py"]
+```
 
-Building & Running the Container
-Build the Image:
-bash
+### Building & Running the Container
 
+1. Build the Image:
+```bash
 cd python
 docker build -t prague-waste-bot:latest .
+```
 
-Run the Container:
-bash
-
+2. Run the Container:
+```bash
 docker run -d --name prague-waste-bot --env-file ../.env prague-waste-bot:latest
+```
 
-Check Logs:
-bash
-
+3. Check Logs:
+```bash
 docker logs -f prague-waste-bot
+```
 
-Stop & Remove:
-bash
-
+4. Stop & Remove:
+```bash
 docker stop prague-waste-bot
 docker rm prague-waste-bot
+```
 
-Docker Compose
-yaml
+### Docker Compose
 
+```yaml
 version: '3.8'
 services:
   telegram-bot:
     build: ./python
     env_file: .env
     restart: unless-stopped
+```
 
-Start the Service:
-bash
-
+1. Start the Service:
+```bash
 docker-compose up -d --build
+```
 
-View Logs:
-bash
-
+2. View Logs:
+```bash
 docker-compose logs -f telegram-bot
+```
 
-Stop & Remove:
-bash
-
+3. Stop & Remove:
+```bash
 docker-compose down
 # Optional: Remove images
 docker-compose down --rmi local
+```
 
-Usage
-Open Telegram and search for your bot.
+## Usage
 
-Send /start for a welcome message.
+1. Open Telegram and search for your bot
+2. Send `/start` for a welcome message
+3. Use `/findtrash` to:
+   - Smart Bins: Share location to see up to 3 nearby smart bins with fill levels
+   - Bulky Waste: Find scheduled pickup points (street, date, district)
+   - Collection Yards: Locate waste yards (address, hours, contact)
+4. Send a photo of a waste item to classify it and find the nearest bin
+5. Send any text (non-command) for an AI-powered response, translated to your Telegram language if needed
 
-Use /findtrash to:
-Smart Bins: Share location to see up to 3 nearby smart bins with fill levels.
+## Troubleshooting & Tips
 
-Bulky Waste: Find scheduled pickup points (street, date, district).
+### Missing Environment Variables
+- Verify `.env` contains all required keys
+- Ensure no trailing spaces or quotes in `.env`
 
-Collection Yards: Locate waste yards (address, hours, contact).
+### Docker Container Fails
+- Check logs: `docker logs prague-waste-bot`
+- Common issues: Invalid API keys or missing `.env`
 
-Send a photo of a waste item to classify it and find the nearest bin.
+### Golemio API Errors (401/403)
+- Confirm `GOLEMIO_API_KEY` is valid and not expired
+- Check Golemio documentation for JWT renewal
 
-Send any text (non-command) for an AI-powered response, translated to your Telegram language if needed.
+### Google Vision API Errors
+- Ensure `VISION_API_KEY` has billing enabled and vision.googleapis.com is active
+- Check quota limits in Google Cloud Console
 
-Troubleshooting & Tips
-Missing Environment Variables:
-Verify .env contains all required keys.
+### Slow LLM Responses
+- Translation/chat involves API calls. Disable translation in `translate_text()` for testing
+- Verify `FEATHERLESS_API_KEY` and check rate limits
 
-Ensure no trailing spaces or quotes in .env.
+### Improve Classification
+- Adjust `maxResults` in Vision API requests
+- Update `map_to_bin()` with more keywords or use a custom model
 
-Docker Container Fails:
-Check logs: docker logs prague-waste-bot.
+### Verbose Logging
+- Add logging module to `main.py` for detailed debugging
 
-Common issues: Invalid API keys or missing .env.
+## Contributing
 
-Golemio API Errors (401/403):
-Confirm GOLEMIO_API_KEY is valid and not expired.
-
-Check Golemio documentation for JWT renewal.
-
-Google Vision API Errors:
-Ensure VISION_API_KEY has billing enabled and vision.googleapis.com is active.
-
-Check quota limits in Google Cloud Console.
-
-Slow LLM Responses:
-Translation/chat involves API calls. Disable translation in translate_text() for testing.
-
-Verify FEATHERLESS_API_KEY and check rate limits.
-
-Improve Classification:
-Adjust maxResults in Vision API requests.
-
-Update map_to_bin() with more keywords or use a custom model.
-
-Verbose Logging:
-Add logging module to main.py for detailed debugging.
-
-Contributing
 Contributions are welcome! To contribute:
-Fork the repository.
 
-Create a branch (git checkout -b feature/your-feature).
-
-Commit changes (git commit -m "Add your feature").
-
-Push to your fork (git push origin feature/your-feature).
-
-Open a pull request.
+1. Fork the repository
+2. Create a branch (`git checkout -b feature/your-feature`)
+3. Commit changes (`git commit -m "Add your feature"`)
+4. Push to your fork (`git push origin feature/your-feature`)
+5. Open a pull request
 
 Report issues or suggest features via GitHub Issues.
-License
+
+## License
+
 This project is licensed under the MIT License. See LICENSE for details.
 
 ---
