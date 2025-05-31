@@ -1,141 +1,276 @@
-# 🔁 Automated Data Pipeline with FastAPI, PostgreSQL, MinIO & n8n
+markdown
 
-This repository provides a ready-to-run local environment for building a market intelligence and automation platform. It integrates:
+# Prague Waste Assistant Bot
 
-- **FastAPI** (Python backend for OCR & API services)  
-- **PostgreSQL** (relational data storage)  
-- **MinIO** (S3-compatible object storage)  
-- **n8n** (workflow engine for automation)  
-- **Adminer** (lightweight database UI)  
+A Telegram bot to help Prague residents identify waste items via photo classification and locate nearby waste-disposal points (smart bins, bulky-waste collection, waste yards) using the Golemio API. The bot integrates with an AI backend (Featherless API + Meta-Llama) for translation and general chat.
 
-The goal is to **automate document processing, CSV parsing, and structured data injection** into PostgreSQL, all triggered by file uploads.
+## Table of Contents
+
+1. [Features](#features)
+2. [Prerequisites](#prerequisites)
+3. [Project Structure](#project-structure)
+4. [Environment Variables](#environment-variables)
+5. [Local Development (Without Docker)](#local-development)
+6. [Docker Setup](#docker-setup)
+   - [Dockerfile (python:3.10-slim)](#dockerfile-python310-slim)
+   - [Building & Running the Container](#building--running-the-container)
+   - [Docker Compose](#docker-compose)
+7. [Usage](#usage)
+8. [Troubleshooting & Tips](#troubleshooting--tips)
+9. [Contributing](#contributing)
+10. [License](#license)
+
+## Features
+
+- **Image Classification**: Upload a photo of a waste item (e.g., plastic bottle, cardboard box), and the bot uses Google Vision API to identify it and map it to a colored bin (e.g., yellow for plastics, blue for paper).
+- **Bin Locator**: After classification, share your location to find the nearest bin of the appropriate type within 500 meters.
+- **Smart Bin Monitor**: Use `/findtrash → Smart Bins`, share your location, and view up to 3 nearby smart bins with fill-level indicators (🟢 green, 🟡 yellow, 🔴 red, or ⚪ unknown).
+- **Bulky Waste & Waste Yards**: Use `/findtrash` to locate scheduled bulky-waste pickup points or permanent waste yards in Prague via the Golemio API.
+- **Multilingual Support**: Messages are translated via Meta-Llama into the user’s Telegram language (if not English).
+- **General AI Chat**: Non-command messages are sent to DeepSeek for AI responses, translated back to the user’s language if needed.
+
+## Prerequisites
+
+- **Docker** (≥ 20.10) and **Docker Compose** (≥ 1.29) for containerized deployment.
+- **Python** (≥ 3.10) and **pip** for local development.
+- **API Keys**:
+  - **Telegram Bot Token**: Obtain from [@BotFather](https://telegram.me/BotFather).
+  - **Featherless API Key**: Sign up at [Featherless](https://featherless.ai) for LLM access.
+  - **Golemio API Key**: Register at [Golemio](https://golemio.cz) for Prague waste data.
+  - **Google Cloud Vision API Key**: Enable at [Google Cloud Console](https://console.cloud.google.com) with billing.
+
+## Project Structure
+
+.
+├── .env                    # Environment variables (never commit to Git)
+├── docker-compose.yml      # Docker Compose configuration
+├── python/
+│   ├── Dockerfile          # Docker image definition
+│   └── requirements.txt    # Python dependencies
+├── app/
+│   ├── main.py             # Bot entry point
+│   ├── helpers.py         # Utility functions
+│   ├── commands.py        # Command handlers
+│   ├── utils.py           # Additional utilities
+│   └── init.py        # Python package init
+└── README.md              # Project documentation
+
+## Environment Variables
+
+Create a `.env` file in the project root with the following:
+
+```env
+TELEGRAM_BOT_TOKEN=your-telegram-bot-token
+FEATHERLESS_API_KEY=your-featherless-api-key
+GOLEMIO_API_KEY=your-golemio-api-key
+VISION_API_KEY=your-google-vision-api-key
+
+Ensure .env is listed in .gitignore.
+
+Replace placeholders with your actual API keys.
+
+Local Development
+Clone the Repository:
+bash
+
+git clone https://github.com/yourusername/prague-waste-bot.git
+cd prague-waste-bot
+
+Set Up Virtual Environment:
+bash
+
+python3.10 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+Install Dependencies:
+bash
+
+pip install --no-cache-dir -r python/requirements.txt
+
+Configure .env:
+bash
+
+cp .env.example .env
+# Edit .env with your API keys
+
+Run the Bot:
+bash
+
+python app/main.py
+
+Output:  Bot started and ready!
+
+Test the Bot:
+Open Telegram, find your bot, and send /start.
+
+Test /findtrash or send a photo to classify waste.
+
+Stop the bot with Ctrl+C.
+
+Docker Setup
+Dockerfile (python:3.10-slim)
+dockerfile
+
+FROM python:3.10-slim
+WORKDIR /app
+COPY python/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/ .
+CMD ["python", "main.py"]
+
+Building & Running the Container
+Build the Image:
+bash
+
+cd python
+docker build -t prague-waste-bot:latest .
+
+Run the Container:
+bash
+
+docker run -d --name prague-waste-bot --env-file ../.env prague-waste-bot:latest
+
+Check Logs:
+bash
+
+docker logs -f prague-waste-bot
+
+Stop & Remove:
+bash
+
+docker stop prague-waste-bot
+docker rm prague-waste-bot
+
+Docker Compose
+yaml
+
+version: '3.8'
+services:
+  telegram-bot:
+    build: ./python
+    env_file: .env
+    restart: unless-stopped
+
+Start the Service:
+bash
+
+docker-compose up -d --build
+
+View Logs:
+bash
+
+docker-compose logs -f telegram-bot
+
+Stop & Remove:
+bash
+
+docker-compose down
+# Optional: Remove images
+docker-compose down --rmi local
+
+Usage
+Open Telegram and search for your bot.
+
+Send /start for a welcome message.
+
+Use /findtrash to:
+Smart Bins: Share location to see up to 3 nearby smart bins with fill levels.
+
+Bulky Waste: Find scheduled pickup points (street, date, district).
+
+Collection Yards: Locate waste yards (address, hours, contact).
+
+Send a photo of a waste item to classify it and find the nearest bin.
+
+Send any text (non-command) for an AI-powered response, translated to your Telegram language if needed.
+
+Troubleshooting & Tips
+Missing Environment Variables:
+Verify .env contains all required keys.
+
+Ensure no trailing spaces or quotes in .env.
+
+Docker Container Fails:
+Check logs: docker logs prague-waste-bot.
+
+Common issues: Invalid API keys or missing .env.
+
+Golemio API Errors (401/403):
+Confirm GOLEMIO_API_KEY is valid and not expired.
+
+Check Golemio documentation for JWT renewal.
+
+Google Vision API Errors:
+Ensure VISION_API_KEY has billing enabled and vision.googleapis.com is active.
+
+Check quota limits in Google Cloud Console.
+
+Slow LLM Responses:
+Translation/chat involves API calls. Disable translation in translate_text() for testing.
+
+Verify FEATHERLESS_API_KEY and check rate limits.
+
+Improve Classification:
+Adjust maxResults in Vision API requests.
+
+Update map_to_bin() with more keywords or use a custom model.
+
+Verbose Logging:
+Add logging module to main.py for detailed debugging.
+
+Contributing
+Contributions are welcome! To contribute:
+Fork the repository.
+
+Create a branch (git checkout -b feature/your-feature).
+
+Commit changes (git commit -m "Add your feature").
+
+Push to your fork (git push origin feature/your-feature).
+
+Open a pull request.
+
+Report issues or suggest features via GitHub Issues.
+License
+This project is licensed under the MIT License. See LICENSE for details.
 
 ---
 
-## 🐳 Services Overview
+### How to Use This
 
-| Service     | URL                      | Purpose                        |
-|-------------|--------------------------|--------------------------------|
-| FastAPI     | http://localhost:8000    | OCR & API endpoints            |
-| Adminer     | http://localhost:8080    | PostgreSQL UI                  |
-| MinIO UI    | http://localhost:8001    | Object-store browser           |
-| MinIO API   | http://localhost:8002    | S3-compatible API              |
-| n8n         | http://localhost:5678    | Automation/workflow editor     |
+1. **Save the README**:
+   - Copy the above content into a file named `README.md` in your project root.
+   - Replace `yourusername` in the repository URL with your actual GitHub username or remove it if the repo isn't public.
 
----
+2. **Verify Formatting**:
+   - Open `README.md` in a Markdown viewer (e.g., GitHub, VS Code, or a Markdown editor) to ensure it renders correctly.
+   - Check for consistent headers, code blocks, and links.
 
-## 🛠️ Getting Started
+3. **Push to Repository**:
+   ```bash
+   git add README.md
+   git commit -m "Update README with improved formatting and content"
+   git push origin main
 
-### 1. Launch the stack
+Clarifications Needed
+If you have specific edits in mind, please provide details, such as:
+Content Changes: Add new sections, update API instructions, or modify specific text.
 
-```bash
-make up
-```
+Repository Info: Provide the actual GitHub repo URL or confirm if it's private.
 
-### 2. Stop the stack
+Additional Sections: E.g., deployment to a cloud service, testing instructions, or specific API setup steps.
 
-```bash
-make down
-```
+Formatting Preferences: Any specific Markdown style (e.g., different header levels, bullet styles)?
 
-### 3. View logs
+I can also generate a diff to show changes from your original README or assist with related tasks (e.g., editing requirements.txt or main.py). Let me know how you'd like to proceed!
 
-```bash
-make logs
-```
+explain Docker Compose
 
----
+other waste management bots
 
-## 🐍 Python FastAPI Application
+more concise instructions
 
-The FastAPI backend (`python/app/main.py`) provides a comprehensive OCR and document processing API with the following features:
+DeepSearch
 
-### Key Components
+Think
 
-- **CORS Configuration** - Cross-origin resource sharing enabled for web clients
-- **MinIO Integration** - Direct connection to object storage for file operations
-- **Tesseract OCR** - Text extraction from images and PDFs
-- **Multiple Upload Methods** - Support for both direct uploads and MinIO-based processing
-
-### API Endpoints
-
-#### OCR Processing
-
-- **/ocr1/** - Processes files stored in MinIO, detecting file type automatically
-- **/ocr2/** - Processes directly uploaded files or JSON payload with binary data
-
-
-#### File Operations
-- **/upload/** - Upload files directly to MinIO with automatic processing
-- **/download/{filename}** - Get file metadata and binary content as a JSON list
-- **/download-file/{filename}** - Stream file for direct download with proper content type
-
-#### Database Integration
-
-- **/api/tables** - Lists all CSV-derived tables in PostgreSQL
-- **/api/table/{table_name}** - Retrieves data from a specific table
-- **/generate-report-pptx/** - Creates a PowerPoint presentation based on table data
-
-### Processing Features
-
-- **Automatic file type detection** - Uses both file extensions and binary signatures
-- **OCR for multiple formats** - Images (PNG, JPG, GIF) and multi-page PDFs
-- **CSV parsing and database integration** - Converts uploaded CSV files to database tables
-- **Comprehensive error handling** - Detailed error messages for troubleshooting
-
-### Implementation Details
-
-- Uses **pytesseract** for OCR text extraction
-- Uses **pdf2image** for PDF to image conversion
-- Implements temporary file handling for secure processing
-- Provides both synchronous and asynchronous endpoints
-- Includes content type detection for proper file handling
-
-## 🧬 Workflow Summary
-
-**n8n Workflow ID:** 3wKEH6VC90v3we9k
-
-**Purpose:** Automatically ingest files from MinIO and store structured data.
-
-1. **Webhook** — triggered on new file upload.
-2. **S3** — list files in uploads/ bucket.
-3. **Split Out** — iterate each file.
-4. **If** — check file extension:
-
-   **CSV branch:**
-   - Download via S3 node.
-   - Extract from File — parse CSV rows.
-   - Code2 — generate CREATE TABLE + INSERT SQL.
-   - Postgres3 — execute queries.
-
-   **OCR branch (PDF/images):**
-   - HTTP Request to FastAPI /ocr1.
-   - Convert to File — wrap text.
-   - Code3 — create OCR table if needed.
-   - Postgres4 — execute creation.
-   - Code1 — split text into rows/columns.
-   - Code4 — optional enrichment.
-
-**Key features:**
-- Dynamic table names from filenames
-- SQL-safe column names based on headers
-- Supports any CSV structure
-- Easily extendable for notifications or other outputs
-
----
-
-## 🧾 Makefile Shortcuts
-
-| Command | Description |
-|---------|-------------|
-| `make up` | Build & start all services (detached) |
-| `make down` | Stop & remove all containers |
-| `make restart` | Recreate everything |
-| `make logs` | Tail all service logs |
-| `make webshell` | Bash into FastAPI container |
-| `make dbshell` | Bash into PostgreSQL container |
-| `make n8nshell` | Bash into n8n container |
-| `make build` | Rebuild Docker images |
-| `make prune` | Prune unused Docker resources |
-
----
