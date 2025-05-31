@@ -76,12 +76,6 @@ git clone https://github.com/yourusername/prague-waste-bot.git
 cd prague-waste-bot
 ```
 
-2. Set Up Virtual Environment:
-```bash
-python3.10 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
 3. Install Dependencies:
 ```bash
 pip install --no-cache-dir -r python/requirements.txt
@@ -203,66 +197,5 @@ docker-compose down --rmi local
 - Translation/chat involves API calls. Disable translation in `translate_text()` for testing
 - Verify `FEATHERLESS_API_KEY` and check rate limits
 
-### Improve Classification
-- Adjust `maxResults` in Vision API requests
-- Update `map_to_bin()` with more keywords or use a custom model
-
 ### Verbose Logging
 - Add logging module to `main.py` for detailed debugging
-
-## Contributing
-
-Contributions are welcome! To contribute:
-
-1. Fork the repository
-2. Create a branch (`git checkout -b feature/your-feature`)
-3. Commit changes (`git commit -m "Add your feature"`)
-4. Push to your fork (`git push origin feature/your-feature`)
-5. Open a pull request
-
-Report issues or suggest features via GitHub Issues.
-
-## License
-
-This project is licensed under the MIT License. See LICENSE for details.
-
----
-
-### How to Use This
-
-1. **Save the README**:
-   - Copy the above content into a file named `README.md` in your project root.
-   - Replace `yourusername` in the repository URL with your actual GitHub username or remove it if the repo isn't public.
-
-2. **Verify Formatting**:
-   - Open `README.md` in a Markdown viewer (e.g., GitHub, VS Code, or a Markdown editor) to ensure it renders correctly.
-   - Check for consistent headers, code blocks, and links.
-
-3. **Push to Repository**:
-   ```bash
-   git add README.md
-   git commit -m "Update README with improved formatting and content"
-   git push origin main
-
-Clarifications Needed
-If you have specific edits in mind, please provide details, such as:
-Content Changes: Add new sections, update API instructions, or modify specific text.
-
-Repository Info: Provide the actual GitHub repo URL or confirm if it's private.
-
-Additional Sections: E.g., deployment to a cloud service, testing instructions, or specific API setup steps.
-
-Formatting Preferences: Any specific Markdown style (e.g., different header levels, bullet styles)?
-
-I can also generate a diff to show changes from your original README or assist with related tasks (e.g., editing requirements.txt or main.py). Let me know how you'd like to proceed!
-
-explain Docker Compose
-
-other waste management bots
-
-more concise instructions
-
-DeepSearch
-
-Think
-
